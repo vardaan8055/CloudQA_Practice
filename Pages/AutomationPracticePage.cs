@@ -84,56 +84,129 @@ namespace CloudQA_Practice.Pages
             return input.GetAttribute("value") ?? string.Empty;
         }
 
-        public void SelectCountry(string countryName)
-        {
-            // Find select by label text "Country" and select by visible text
-            var label = _wait.Until(d => d.FindElement(By.XPath("//label[contains(normalize-space(.), 'Country')]") ));
+        public void SelectCountry(string countryName){
+
+            // Find label for Country (same approach as before)
+            var label = _wait.Until(d => d.FindElement(By.XPath("//label[contains(normalize-space(.), 'Country')]")));
             var forAttr = label.GetAttribute("for");
-            IWebElement selectEl = null;
+            IWebElement target = null;
             if (!string.IsNullOrEmpty(forAttr))
             {
-                selectEl = _driver.FindElement(By.Id(forAttr));
+                target = _driver.FindElement(By.Id(forAttr));
             }
             else
             {
-                selectEl = label.FindElement(By.XPath(".//following::select[1]" ));
+                target = label.FindElement(By.XPath(".//following::select[1] | .//following::input[1]"));
             }
 
-            var select = new SelectElement(selectEl);
-            // Try exact first, else try partial match
-            try { select.SelectByText(countryName); }
-            catch
+            // If it's a select element, use SelectElement
+            var tag = target.TagName?.ToLowerInvariant() ?? "";
+            if (tag == "select")
             {
-                foreach (var opt in select.Options)
+                var select = new SelectElement(target);
+                try
                 {
-                    if (opt.Text.IndexOf(countryName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    select.SelectByText(countryName);
+                    return;
+                }
+                catch
+                {
+                    foreach (var opt in select.Options)
                     {
-                        select.SelectByText(opt.Text);
-                        break;
+                        if (opt.Text.IndexOf(countryName, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            select.SelectByText(opt.Text);
+                            return;
+                        }
                     }
                 }
             }
+
+            // Otherwise assume it's an input (autocomplete). Type, wait for suggestions, choose best match.
+            if (tag == "input" || tag == "textarea" || string.IsNullOrEmpty(tag))
+            {
+                target.Clear();
+                target.SendKeys(countryName);
+
+                // Wait briefly for suggestion dropdown to appear.
+                // Common patterns: a ul/li list, or divs with role=listbox/option.
+                IWebElement suggestion = null;
+                try
+                {
+                    // try common listbox pattern
+                    suggestion = _wait.Until(d =>
+                    {
+                        // find visible option that contains the country name
+                        var opts = d.FindElements(By.XPath("//ul//li[normalize-space(.) and contains(normalize-space(.), '" + countryName + "')] | //div[@role='listbox']//div[contains(normalize-space(.), '" + countryName + "')] | //div[contains(@class,'suggest') or contains(@class,'dropdown')]//div[contains(normalize-space(.), '" + countryName + "')]"));
+                        foreach (var o in opts)
+                        {
+                            if (o.Displayed)
+                                return o;
+                        }
+                        return null;
+                    });
+                }
+                catch { /* timed out, fallback to pressing Enter */ }
+
+                if (suggestion != null)
+                {
+                    try
+                    {
+                        suggestion.Click();
+                        return;
+                    }
+                    catch
+                    {
+                        // fallback to sending Enter
+                    }
+                }
+
+                // fallback: press Enter to accept the typed value
+                target.SendKeys(Keys.Enter);
+            }
         }
 
-        public string GetSelectedCountry()
-        {
+
+        public string GetSelectedCountry(){
             try
             {
                 var label = _driver.FindElement(By.XPath("//label[contains(normalize-space(.), 'Country')]"));
                 var forAttr = label.GetAttribute("for");
-                IWebElement selectEl = null;
+                IWebElement target = null;
                 if (!string.IsNullOrEmpty(forAttr))
                 {
-                    selectEl = _driver.FindElement(By.Id(forAttr));
+                    target = _driver.FindElement(By.Id(forAttr));
                 }
                 else
                 {
-                    selectEl = label.FindElement(By.XPath(".//following::select[1]" ));
+                    target = label.FindElement(By.XPath(".//following::select[1] | .//following::input[1]"));
                 }
-                var select = new SelectElement(selectEl);
-                return select.SelectedOption.Text;
+
+                var tag = target.TagName?.ToLowerInvariant() ?? "";
+                if (tag == "select")
+                {
+                    var select = new SelectElement(target);
+                    return select.SelectedOption.Text;
+                }
+
+                // If it's an input, return its value or visible text of chosen suggestion
+                if (tag == "input" || tag == "textarea" || string.IsNullOrEmpty(tag))
+                {
+                    var val = target.GetAttribute("value");
+                    if (!string.IsNullOrEmpty(val)) return val.Trim();
+
+                    // as a fallback, try to read a nearby display element
+                    try
+                    {
+                        var disp = label.FindElement(By.XPath(".//following::*[contains(@class,'selected') or contains(@class,'value')][1]"));
+                        if (disp != null) return disp.Text.Trim();
+                    }
+                    catch { }
+                }
             }
-            catch { return string.Empty; }
+            catch { }
+
+            return string.Empty;
         }
     }
 }
