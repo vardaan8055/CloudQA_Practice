@@ -8,14 +8,40 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Install chromium & chromedriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          # ensure chromedriver is executable
+          sudo chmod +x /usr/bin/chromedriver || true
+          # print versions for debugging
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; fi
+          if [ -x /usr/bin/chromedriver ]; then /usr/bin/chromedriver --version; fi
+
       - name: Restore
         run: dotnet restore
+
       - name: Run tests (headless)
+        run: dotnet test --logger:trx
+
+      # Optional debugging step: if tests fail, print chromedriver.log (only if you enabled verbose logging in tests)
+      - name: Show chromedriver log (if present)
+        if: failure()
         run: |
-          dotnet test --logger:trx
+          if [ -f chromedriver.log ]; then
+            echo "==== chromedriver.log ===="
+            cat chromedriver.log
+          else
+            echo "chromedriver.log not found"
+          fi
